@@ -1,0 +1,21 @@
+# Sensitive files - NEVER commit these
+*.json
+terraform-admin.json
+terraform.tfvars
+
+# Keep the example file but ignore the actual variables file
+*.tfvars.example
+
+# Terraform state and cache
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
