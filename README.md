@@ -71,14 +71,15 @@ The infrastructure features a **multi-subnet design** with nodes distributed acr
   - Purpose: Hosts second worker node for workload segregation
 
 #### 3. **Compute Instances**
-- **Count**: 3 virtual machines
+- **Count**: 3 virtual machines (1 control plane + 2 workers by default)
 - **Control Plane**: `k8s-control-plane` (in subnet-a, zone europe-west9-a)
 - **Worker Nodes**: 
   - `k8s-worker-1` (in subnet-a, zone europe-west9-a)
   - `k8s-worker-2` (in subnet-b, zone europe-west9-b)
 - **Machine Type**: `e2-medium` (2 vCPUs, 4GB RAM)
 - **Operating System**: Ubuntu 22.04 LTS
-- **Disk**: 20GB persistent boot disk
+- **Disk**: 10GB persistent boot disk
+- **Configurable**: Worker count can be adjusted via `worker_count` variable
 
 #### 4. **Security Configuration**
 - **Firewall Rules**:
@@ -164,6 +165,10 @@ nano backend.conf
 - The `backend.conf` file will contain your bucket name and should also be private
 - Ensure your SSH public key is available at `~/.ssh/id_rsa.pub`
 
+**Customization Options:**
+- Adjust `worker_count` in `terraform.tfvars` to change number of worker nodes (default: 2)
+- Workers are automatically distributed across subnets and zones for high availability
+
 ### 3. Initialize Terraform
 ```bash
 # Initialize with backend configuration
@@ -188,9 +193,10 @@ ssh ubuntu@<node-ip-address>
 
 ## Cost Considerations
 
-- **Estimated Monthly Cost**: ~$60-90 USD (3 x e2-medium instances)
+- **Estimated Monthly Cost**: ~$45-75 USD (1 control plane + 2 workers with e2-medium instances)
 - **Cost Optimization**: 
   - Instances are sized for learning/testing, not production workloads
+  - 10GB disks keep costs minimal while providing sufficient space
   - Consider using preemptible instances for additional savings
   - Remember to destroy resources when not in use: `terraform destroy`
 
@@ -217,8 +223,12 @@ After infrastructure deployment:
 # Check instance status
 gcloud compute instances list
 
-# SSH to a specific node
-gcloud compute ssh k8s-node-1 --zone=europe-west9-a
+# SSH to control plane
+gcloud compute ssh k8s-control-plane --zone=europe-west9-a
+
+# SSH to workers
+gcloud compute ssh k8s-worker-1 --zone=europe-west9-a
+gcloud compute ssh k8s-worker-2 --zone=europe-west9-b
 
 # View firewall rules
 gcloud compute firewall-rules list
