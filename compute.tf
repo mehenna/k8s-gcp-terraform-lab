@@ -1,8 +1,8 @@
 # === Instance Template for Kubernetes Nodes ===
 resource "google_compute_instance_template" "k8s_node_template" {
-  name_prefix   = "k8s-node-"
-  machine_type  = "e2-medium"
-  region        = var.region
+  name_prefix    = "k8s-node-"
+  machine_type   = "e2-medium"
+  region         = var.region
   can_ip_forward = true
 
   tags = ["k8s", "node"]
@@ -11,6 +11,7 @@ resource "google_compute_instance_template" "k8s_node_template" {
     source_image = "ubuntu-os-cloud/ubuntu-2204-lts"
     auto_delete  = true
     boot         = true
+    disk_size_gb = 10  # Added for consistency
   }
 
   network_interface {
@@ -20,12 +21,16 @@ resource "google_compute_instance_template" "k8s_node_template" {
   }
 
   service_account {
-    email  = "k8s-nodes@${var.project_id}.iam.gserviceaccount.com"
+    email  = google_service_account.k8s_nodes.email  # Reference instead of hardcoded
     scopes = ["cloud-platform"]
   }
 
   metadata = {
     ssh-keys = "ubuntu:${file("~/.ssh/id_rsa.pub")}"
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -34,7 +39,7 @@ resource "google_compute_instance_template" "k8s_node_template" {
 resource "google_compute_instance" "control_plane" {
   name         = "k8s-control-plane"
   machine_type = "e2-medium"
-  zone         = "europe-west9-a"
+  zone         = local.zone_map["worker-1"]  # Use locals for consistency
   tags         = ["k8s", "control-plane"]
 
   boot_disk {
@@ -51,23 +56,27 @@ resource "google_compute_instance" "control_plane" {
   }
 
   service_account {
-    email  = "k8s-nodes@${var.project_id}.iam.gserviceaccount.com"
+    email  = google_service_account.k8s_nodes.email  # Reference instead of hardcoded
     scopes = ["cloud-platform"]
   }
 
   metadata = {
     ssh-keys = "ubuntu:${file("~/.ssh/id_rsa.pub")}"
   }
+
+  # Prevent accidental deletion
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # === Worker Nodes (Dynamic) ===
-
 resource "google_compute_instance" "workers" {
-  count        = var.worker_count
-  name         = "k8s-worker-${count.index + 1}"
+  for_each     = toset(local.node_roles)
+  name         = "k8s-${each.key}"
   machine_type = "e2-medium"
-  zone         = count.index == 0 ? "europe-west9-a" : "europe-west9-b"
-  tags         = ["k8s", "worker"]
+  zone         = local.zone_map[each.key]
+  tags         = ["k8s", "worker", each.key]  # Added role-specific tag
 
   boot_disk {
     initialize_params {
@@ -78,16 +87,21 @@ resource "google_compute_instance" "workers" {
 
   network_interface {
     network    = google_compute_network.vpc.id
-    subnetwork = count.index == 0 ? google_compute_subnetwork.subnet-a.id : google_compute_subnetwork.subnet-b.id
+    subnetwork = local.subnet_map[each.key]
     access_config {}
   }
 
   service_account {
-    email  = "k8s-nodes@${var.project_id}.iam.gserviceaccount.com"
+    email  = google_service_account.k8s_nodes.email  # Reference instead of hardcoded
     scopes = ["cloud-platform"]
   }
 
   metadata = {
     ssh-keys = "ubuntu:${file("~/.ssh/id_rsa.pub")}"
+  }
+
+  # Allow recreation during updates
+  lifecycle {
+    create_before_destroy = true
   }
 }

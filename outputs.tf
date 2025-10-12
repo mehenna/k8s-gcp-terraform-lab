@@ -10,19 +10,21 @@ output "subnet_b_id" {
   value = google_compute_subnetwork.subnet-b.id
 }
 
+# Mapping of roles → public IPs
 output "k8s_node_role_ip_map" {
-  description = "Mapping of Kubernetes roles to public IPs"
+  description = "Mapping of Kubernetes node roles to their public IPs"
   value = merge(
     {
-      control_plane = google_compute_instance.control_plane.network_interface[0].access_config[0].nat_ip
+      control-plane = google_compute_instance.control_plane.network_interface[0].access_config[0].nat_ip
     },
     {
-      for idx, node in google_compute_instance.workers :
-      "worker_${idx + 1}" => node.network_interface[0].access_config[0].nat_ip
+      for role, node in google_compute_instance.workers :
+      role => node.network_interface[0].access_config[0].nat_ip
     }
   )
 }
 
+# List of all node IPs
 output "k8s_node_ips" {
   description = "List of all Kubernetes node public IPs"
   value = concat(
