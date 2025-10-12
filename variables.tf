@@ -16,3 +16,10 @@ variable "credentials_file" {
   default     = "./terraform-admin.json"
 }
 
+variable "worker_count" {
+  description = "Number of worker nodes to create"
+  type        = number
+  default     = 2
+}
+
+

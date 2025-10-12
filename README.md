@@ -15,12 +15,16 @@ This project provisions a Google Cloud Platform (GCP) infrastructure designed fo
 
 - **Learning Environment**: Create a cost-effective, reproducible Kubernetes cluster for certification study
 - **Multi-node Setup**: Provision multiple nodes to practice cluster administration tasks
+- **Network Segregation**: Distribute nodes across multiple subnets for advanced networking scenarios
 - **Security Focus**: Implement proper network segmentation and security groups for CKS practice
 - **Infrastructure as Code**: Use Terraform for consistent, version-controlled infrastructure deployment
 
 ## Architecture Overview
 
-The infrastructure consists of the following components:
+The infrastructure features a **multi-subnet design** with nodes distributed across different network segments:
+- **Control Plane**: Isolated in subnet-a for administrative access
+- **Worker Nodes**: Split between subnet-a and subnet-b for workload segregation
+- **Cross-Subnet Communication**: Enabled for Kubernetes cluster networking
 
 ### Network Architecture
 
@@ -37,18 +41,14 @@ The infrastructure consists of the following components:
 │  │  │   tf-subnet-a    │    │      tf-subnet-b         │   ││
 │  │  │   9.0.1.0/24     │    │      9.0.2.0/24          │   ││
 │  │  │                  │    │                          │   ││
+│  │  │ ┌──────────────┐ │    │ ┌──────────────────────┐ │   ││
+│  │  │ │control-plane │ │    │ │    k8s-worker-2      │ │   ││
+│  │  │ │  e2-medium   │ │    │ │    e2-medium         │ │   ││
+│  │  │ └──────────────┘ │    │ └──────────────────────┘ │   ││
 │  │  │ ┌──────────────┐ │    │                          │   ││
-│  │  │ │ k8s-node-1   │ │    │      (Reserved for       │   ││
-│  │  │ │ e2-medium    │ │    │       future use)        │   ││
-│  │  │ └──────────────┘ │    │                          │   ││
-│  │  │ ┌──────────────┐ │    │                          │   ││
-│  │  │ │ k8s-node-2   │ │    │                          │   ││
-│  │  │ │ e2-medium    │ │    │                          │   ││
-│  │  │ └──────────────┘ │    │                          │   ││
-│  │  │ ┌──────────────┐ │    │                          │   ││
-│  │  │ │ k8s-node-3   │ │    │                          │   ││
-│  │  │ │ e2-medium    │ │    │                          │   ││
-│  │  │ └──────────────┘ │    │                          │   ││
+│  │  │ │ k8s-worker-1 │ │    │   (Additional capacity   │   ││
+│  │  │ │  e2-medium   │ │    │    for workload          │   ││
+│  │  │ └──────────────┘ │    │    segregation)          │   ││
 │  │  └──────────────────┘    └──────────────────────────┘   ││
 │  └─────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────┘
@@ -64,19 +64,21 @@ The infrastructure consists of the following components:
 #### 2. **Subnets**
 - **Subnet A** (`tf-subnet-a`): 
   - CIDR: `9.0.1.0/24`
-  - Purpose: Hosts all Kubernetes nodes
+  - Purpose: Hosts control plane and first worker node
   - Region: `europe-west9`
 - **Subnet B** (`tf-subnet-b`): 
   - CIDR: `9.0.2.0/24`
-  - Purpose: Reserved for future expansion or workload segregation
+  - Purpose: Hosts second worker node for workload segregation
 
 #### 3. **Compute Instances**
 - **Count**: 3 virtual machines
-- **Names**: `k8s-node-1`, `k8s-node-2`, `k8s-node-3`
+- **Control Plane**: `k8s-control-plane` (in subnet-a, zone europe-west9-a)
+- **Worker Nodes**: 
+  - `k8s-worker-1` (in subnet-a, zone europe-west9-a)
+  - `k8s-worker-2` (in subnet-b, zone europe-west9-b)
 - **Machine Type**: `e2-medium` (2 vCPUs, 4GB RAM)
 - **Operating System**: Ubuntu 22.04 LTS
 - **Disk**: 20GB persistent boot disk
-- **Zone**: `europe-west9-a`
 
 #### 4. **Security Configuration**
 - **Firewall Rules**:
@@ -99,6 +101,7 @@ k8s-gcp-terraform-lab/
 ├── main.tf                    # Terraform configuration and backend setup
 ├── variables.tf               # Variable definitions (no sensitive defaults)
 ├── terraform.tfvars.example   # Example variables file (copy to terraform.tfvars)
+├── backend.conf.example       # Example backend config (copy to backend.conf)
 ├── network.tf                 # VPC, subnets, and firewall rules
 ├── compute.tf                 # VM instances and instance templates
 ├── outputs.tf                 # Output values for infrastructure components
@@ -149,17 +152,22 @@ cp terraform.tfvars.example terraform.tfvars
 
 # Edit terraform.tfvars with your actual values
 nano terraform.tfvars
+
+# Optional: Configure backend for remote state storage
+cp backend.conf.example backend.conf
+nano backend.conf
 ```
 
 **Important Security Notes:**
 - Place your GCP service account JSON key as `terraform-admin.json` in the project root directory
 - The `terraform.tfvars` file will contain your project ID and should NEVER be committed to version control
+- The `backend.conf` file will contain your bucket name and should also be private
 - Ensure your SSH public key is available at `~/.ssh/id_rsa.pub`
-- Configure your GCS backend bucket name in `main.tf` if using remote state
 
 ### 3. Initialize Terraform
 ```bash
-terraform init
+# Initialize with backend configuration
+terraform init -backend-config=backend.conf
 ```
 
 ### 4. Review and Plan

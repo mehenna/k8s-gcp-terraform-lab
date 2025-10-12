@@ -2,9 +2,11 @@
 *.json
 terraform-admin.json
 terraform.tfvars
+backend.conf
 
-# Keep the example file but ignore the actual variables file
-*.tfvars.example
+# Keep example files but ignore actual configuration files
+terraform.tfvars.example
+backend.conf.example
 
 # Terraform state and cache
 .terraform/
