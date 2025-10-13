@@ -1,7 +1,8 @@
 provider "google" {
-  project     = var.project_id
-  region      = var.region
-  credentials = file(var.credentials_file)
+  project = var.project_id
+  region  = var.region
+  # Will use gcloud credentials automatically : 
+  #  export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)
 }
 
 resource "google_compute_network" "vpc" {

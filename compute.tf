@@ -66,7 +66,7 @@ resource "google_compute_instance" "control_plane" {
 
   # Prevent accidental deletion
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = false
   }
 }
 
