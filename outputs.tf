@@ -24,6 +24,26 @@ output "k8s_node_role_ip_map" {
   )
 }
 
+# Service account information
+output "terraform_admin_service_account_email" {
+  description = "Email of the Terraform admin service account"
+  value       = google_service_account.terraform_admin.email
+}
+
+output "terraform_admin_key_file" {
+  description = "Path to the generated Terraform admin service account key file"
+  value       = local_file.terraform_admin_key.filename
+}
+
+# Network configuration
+output "subnet_cidrs" {
+  description = "CIDR ranges of the subnets"
+  value = {
+    subnet_a = google_compute_subnetwork.subnet-a.ip_cidr_range
+    subnet_b = google_compute_subnetwork.subnet-b.ip_cidr_range
+  }
+}
+
 # List of all node IPs
 output "k8s_node_ips" {
   description = "List of all Kubernetes node public IPs"
