@@ -164,3 +164,61 @@ resource "google_compute_forwarding_rule" "k8s_api" {
   port_range            = "6443"
   backend_service       = google_compute_region_backend_service.k8s_api.id
 }
+
+# === Internal Load Balancer for HA Kubernetes API Server (for node-to-API communication) ===
+
+# Static internal IP for the internal load balancer
+resource "google_compute_address" "k8s_api_internal_lb_ip" {
+  name         = "k8s-api-internal-lb-ip"
+  region       = var.region
+  address_type = "INTERNAL"
+  subnetwork   = google_compute_subnetwork.subnet-a.id
+  purpose      = "GCE_ENDPOINT"
+}
+
+# Internal health check for control plane
+resource "google_compute_region_health_check" "k8s_api_internal" {
+  name                = "k8s-api-internal-health-check"
+  region              = var.region
+  check_interval_sec  = 5
+  timeout_sec         = 5
+  healthy_threshold   = 2
+  unhealthy_threshold = 2
+
+  tcp_health_check {
+    port = 6443
+  }
+}
+
+# Internal backend service
+resource "google_compute_region_backend_service" "k8s_api_internal" {
+  name                  = "k8s-api-internal-backend-service"
+  region                = var.region
+  protocol              = "TCP"
+  load_balancing_scheme = "INTERNAL"
+  health_checks         = [google_compute_region_health_check.k8s_api_internal.id]
+  timeout_sec           = 10
+
+  # Add all instance groups as backends
+  dynamic "backend" {
+    for_each = google_compute_instance_group.control_plane
+    content {
+      group          = backend.value.id
+      balancing_mode = "CONNECTION"
+    }
+  }
+}
+
+# Internal forwarding rule (entry point for internal traffic)
+resource "google_compute_forwarding_rule" "k8s_api_internal" {
+  name                  = "k8s-api-internal-forwarding-rule"
+  region                = var.region
+  ip_address            = google_compute_address.k8s_api_internal_lb_ip.address
+  ip_protocol           = "TCP"
+  load_balancing_scheme = "INTERNAL"
+  ports                 = ["6443"]
+  backend_service       = google_compute_region_backend_service.k8s_api_internal.id
+  network               = google_compute_network.vpc.id
+  subnetwork            = google_compute_subnetwork.subnet-a.id
+  allow_global_access   = true  # Allow access from all regions
+}

@@ -68,3 +68,9 @@ output "k8s_api_lb_ip" {
   description = "Load balancer IP for Kubernetes API server (use this for kubeadm init)"
   value       = google_compute_address.k8s_api_lb_ip.address
 }
+
+# Internal Load Balancer IP for Kubernetes API (for HA within VPC)
+output "k8s_api_internal_lb_ip" {
+  description = "Internal load balancer IP for Kubernetes API server (use this for node-to-API communication)"
+  value       = google_compute_address.k8s_api_internal_lb_ip.address
+}
