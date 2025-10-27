@@ -78,6 +78,21 @@ resource "google_compute_firewall" "allow-k8s-cluster" {
   target_tags = ["k8s"]
 }
 
+# Health checks from GCP load balancer to control plane nodes
+resource "google_compute_firewall" "allow-health-checks" {
+  name    = "allow-health-checks"
+  network = google_compute_network.vpc.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["6443"]
+  }
+
+  # GCP health check source IP ranges
+  source_ranges = ["35.191.0.0/16", "130.211.0.0/22"]
+  target_tags   = ["control-plane"]
+}
+
 # === Modern TCP Load Balancer for Kubernetes API Server ===
 
 # Static IP for the load balancer
