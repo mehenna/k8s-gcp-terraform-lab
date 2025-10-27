@@ -52,3 +52,9 @@ output "k8s_node_ips" {
     [for node in google_compute_instance.workers : node.network_interface[0].access_config[0].nat_ip]
   )
 }
+
+# Load Balancer IP for Kubernetes API
+output "k8s_api_lb_ip" {
+  description = "Load balancer IP for Kubernetes API server (use this for kubeadm init)"
+  value       = google_compute_address.k8s_api_lb_ip.address
+}

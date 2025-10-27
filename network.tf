@@ -77,3 +77,67 @@ resource "google_compute_firewall" "allow-k8s-cluster" {
   source_tags = ["k8s"]
   target_tags = ["k8s"]
 }
+
+# === Modern TCP Load Balancer for Kubernetes API Server ===
+
+# Static IP for the load balancer
+resource "google_compute_address" "k8s_api_lb_ip" {
+  name   = "k8s-api-lb-ip"
+  region = var.region
+}
+
+# Modern health check with proper TCP support (regional)
+resource "google_compute_region_health_check" "k8s_api" {
+  name                = "k8s-api-health-check"
+  region              = var.region
+  check_interval_sec  = 5
+  timeout_sec         = 5
+  healthy_threshold   = 2
+  unhealthy_threshold = 2
+
+  tcp_health_check {
+    port = 6443
+  }
+}
+
+# Instance group for control plane nodes (will be populated later)
+resource "google_compute_instance_group" "control_plane" {
+  name        = "k8s-control-plane-ig"
+  description = "Instance group for Kubernetes control plane nodes"
+  zone        = local.available_zones[0]
+  network     = google_compute_network.vpc.id
+
+  # Instances will be added when we create multiple control planes
+  instances = []
+
+  named_port {
+    name = "k8s-api"
+    port = 6443
+  }
+}
+
+# Regional backend service
+resource "google_compute_region_backend_service" "k8s_api" {
+  name                  = "k8s-api-backend-service"
+  region                = var.region
+  protocol              = "TCP"
+  load_balancing_scheme = "EXTERNAL"
+  health_checks         = [google_compute_region_health_check.k8s_api.id]
+  timeout_sec           = 10
+
+  backend {
+    group = google_compute_instance_group.control_plane.id
+    balancing_mode = "CONNECTION"
+  }
+}
+
+# Forwarding rule (external entry point)
+resource "google_compute_forwarding_rule" "k8s_api" {
+  name                  = "k8s-api-forwarding-rule"
+  region                = var.region
+  ip_address            = google_compute_address.k8s_api_lb_ip.address
+  ip_protocol           = "TCP"
+  load_balancing_scheme = "EXTERNAL"
+  port_range            = "6443"
+  backend_service       = google_compute_region_backend_service.k8s_api.id
+}
