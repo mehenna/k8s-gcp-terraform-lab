@@ -15,7 +15,8 @@ output "k8s_node_role_ip_map" {
   description = "Mapping of Kubernetes node roles to their public IPs"
   value = merge(
     {
-      control-plane = google_compute_instance.control_plane.network_interface[0].access_config[0].nat_ip
+      for name, instance in google_compute_instance.control_plane :
+      name => instance.network_interface[0].access_config[0].nat_ip
     },
     {
       for role, node in google_compute_instance.workers :
@@ -48,9 +49,18 @@ output "subnet_cidrs" {
 output "k8s_node_ips" {
   description = "List of all Kubernetes node public IPs"
   value = concat(
-    [google_compute_instance.control_plane.network_interface[0].access_config[0].nat_ip],
+    [for instance in google_compute_instance.control_plane : instance.network_interface[0].access_config[0].nat_ip],
     [for node in google_compute_instance.workers : node.network_interface[0].access_config[0].nat_ip]
   )
+}
+
+# Control plane IPs (for easy reference)
+output "k8s_control_plane_ips" {
+  description = "Map of control plane nodes to their public IPs"
+  value = {
+    for name, instance in google_compute_instance.control_plane :
+    name => instance.network_interface[0].access_config[0].nat_ip
+  }
 }
 
 # Load Balancer IP for Kubernetes API

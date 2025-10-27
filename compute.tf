@@ -35,11 +35,12 @@ resource "google_compute_instance_template" "k8s_node_template" {
 }
 
 
-# === Control Plane Node (Static) ===
+# === Control Plane Nodes (Multiple for HA) ===
 resource "google_compute_instance" "control_plane" {
-  name         = "k8s-control-plane"
+  for_each     = toset(local.control_plane_nodes)
+  name         = "k8s-${each.key}"
   machine_type = "e2-medium"
-  zone         = local.zone_map["worker-1"]  # Use locals for consistency
+  zone         = local.control_plane_config[each.key].zone
   tags         = ["k8s", "control-plane"]
 
   boot_disk {
@@ -51,12 +52,12 @@ resource "google_compute_instance" "control_plane" {
 
   network_interface {
     network    = google_compute_network.vpc.id
-    subnetwork = google_compute_subnetwork.subnet-a.id
+    subnetwork = local.control_plane_config[each.key].subnet
     access_config {}
   }
 
   service_account {
-    email  = google_service_account.k8s_nodes.email  # Reference instead of hardcoded
+    email  = google_service_account.k8s_nodes.email
     scopes = ["cloud-platform"]
   }
 
@@ -64,9 +65,8 @@ resource "google_compute_instance" "control_plane" {
     ssh-keys = "ubuntu:${file("~/.ssh/id_rsa.pub")}"
   }
 
-  # Prevent accidental deletion
   lifecycle {
-    prevent_destroy = false
+    create_before_destroy = true
   }
 }
 

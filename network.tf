@@ -100,15 +100,19 @@ resource "google_compute_region_health_check" "k8s_api" {
   }
 }
 
-# Instance group for control plane nodes (will be populated later)
+# Instance groups for control plane nodes (one per zone)
 resource "google_compute_instance_group" "control_plane" {
-  name        = "k8s-control-plane-ig"
-  description = "Instance group for Kubernetes control plane nodes"
-  zone        = local.available_zones[0]
+  for_each    = toset(local.available_zones)
+  name        = "k8s-control-plane-ig-${split("-", each.key)[2]}"  # Extract zone letter (a, b, c)
+  description = "Instance group for Kubernetes control plane nodes in ${each.key}"
+  zone        = each.key
   network     = google_compute_network.vpc.id
 
-  # Instances will be added when we create multiple control planes
-  instances = []
+  # Add control plane instances that belong to this zone
+  instances = [
+    for name, instance in google_compute_instance.control_plane : 
+    instance.self_link if instance.zone == each.key
+  ]
 
   named_port {
     name = "k8s-api"
@@ -125,9 +129,13 @@ resource "google_compute_region_backend_service" "k8s_api" {
   health_checks         = [google_compute_region_health_check.k8s_api.id]
   timeout_sec           = 10
 
-  backend {
-    group = google_compute_instance_group.control_plane.id
-    balancing_mode = "CONNECTION"
+  # Add all instance groups as backends
+  dynamic "backend" {
+    for_each = google_compute_instance_group.control_plane
+    content {
+      group          = backend.value.id
+      balancing_mode = "CONNECTION"
+    }
   }
 }
 
