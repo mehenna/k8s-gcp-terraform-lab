@@ -21,91 +21,132 @@ This project provisions a Google Cloud Platform (GCP) infrastructure designed fo
 
 ## Architecture Overview
 
-The infrastructure features a **multi-subnet design** with nodes distributed across different network segments:
-- **Control Plane**: Isolated in subnet-a for administrative access
-- **Worker Nodes**: Split between subnet-a and subnet-b for workload segregation
-- **Cross-Subnet Communication**: Enabled for Kubernetes cluster networking
+The infrastructure features a **High Availability (HA)** design with **3 control plane nodes** distributed across multiple availability zones for production-grade reliability:
+- **Control Plane Cluster**: 3 nodes spread across zones (a, b, c) for redundancy
+- **Dual Load Balancer Setup**: External and internal TCP load balancers for API server access
+- **Worker Nodes**: Distributed across availability zones for high availability
+- **Stacked etcd**: 3-member etcd cluster on control plane nodes (quorum-based)
+- **Multi-Zone Resilience**: Survives zone failures with automatic failover
 
-### Network Architecture
+### HA Network Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    GCP Project                              │
-│                your-gcp-project-id                          │
-│                                                             │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │                VPC Network (tf-vpc)                     ││
-│  │                                                         ││
-│  │  ┌──────────────────┐    ┌──────────────────────────┐   ││
-│  │  │   Subnet A       │    │      Subnet B            │   ││
-│  │  │   tf-subnet-a    │    │      tf-subnet-b         │   ││
-│  │  │   9.0.1.0/24     │    │      9.0.2.0/24          │   ││
-│  │  │                  │    │                          │   ││
-│  │  │ ┌──────────────┐ │    │ ┌──────────────────────┐ │   ││
-│  │  │ │control-plane │ │    │ │    k8s-worker-2      │ │   ││
-│  │  │ │  e2-medium   │ │    │ │    e2-medium         │ │   ││
-│  │  │ └──────────────┘ │    │ └──────────────────────┘ │   ││
-│  │  │ ┌──────────────┐ │    │                          │   ││
-│  │  │ │ k8s-worker-1 │ │    │   (Additional capacity   │   ││
-│  │  │ │  e2-medium   │ │    │    for workload          │   ││
-│  │  │ └──────────────┘ │    │    segregation)          │   ││
-│  │  └──────────────────┘    └──────────────────────────┘   ││
-│  └─────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│                         GCP Project - HA Cluster                            │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐│
+│  │                    VPC Network (tf-vpc) - 9.0.0.0/16                   ││
+│  │                                                                          ││
+│  │  ┌─────────────────────────────────────────────────────────────────┐   ││
+│  │  │  Regional TCP Load Balancer (External) - 34.155.143.202:6443   │   ││
+│  │  │  • kubectl/API access from internet                              │   ││
+│  │  │  • Health checks on all 3 control planes                         │   ││
+│  │  └─────────────────────────────────────────────────────────────────┘   ││
+│  │  ┌─────────────────────────────────────────────────────────────────┐   ││
+│  │  │  Regional TCP Load Balancer (Internal) - 9.0.1.6:6443          │   ││
+│  │  │  • Node-to-API communication within VPC                          │   ││
+│  │  │  • Solves GCP hairpinning limitation                             │   ││
+│  │  └─────────────────────────────────────────────────────────────────┘   ││
+│  │                                                                          ││
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐     ││
+│  │  │   Zone A         │  │   Zone B         │  │   Zone C         │     ││
+│  │  │ europe-west9-a   │  │ europe-west9-b   │  │ europe-west9-c   │     ││
+│  │  │                  │  │                  │  │                  │     ││
+│  │  │ ┌──────────────┐ │  │ ┌──────────────┐ │  │ ┌──────────────┐ │     ││
+│  │  │ │control-plane-│ │  │ │control-plane-│ │  │ │control-plane-│ │     ││
+│  │  │ │      1       │ │  │ │      2       │ │  │ │      3       │ │     ││
+│  │  │ │  e2-medium   │ │  │ │  e2-medium   │ │  │ │  e2-medium   │ │     ││
+│  │  │ │  etcd member │ │  │ │  etcd member │ │  │ │  etcd member │ │     ││
+│  │  │ └──────────────┘ │  │ └──────────────┘ │  │ └──────────────┘ │     ││
+│  │  │                  │  │                  │  │                  │     ││
+│  │  │ ┌──────────────┐ │  │ ┌──────────────┐ │  │                  │     ││
+│  │  │ │ k8s-worker-1 │ │  │ │ k8s-worker-2 │ │  │                  │     ││
+│  │  │ │  e2-medium   │ │  │ │  e2-medium   │ │  │                  │     ││
+│  │  │ └──────────────┘ │  │ └──────────────┘ │  │                  │     ││
+│  │  └──────────────────┘  └──────────────────┘  └──────────────────┘     ││
+│  └──────────────────────────────────────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Infrastructure Components
 
 #### 1. **Virtual Private Cloud (VPC)**
 - **Name**: `tf-vpc`
-- **Purpose**: Isolated network environment for the Kubernetes cluster
-- **Configuration**: Custom VPC with manual subnet creation
+- **Purpose**: Isolated network environment for the HA Kubernetes cluster
+- **CIDR**: `9.0.0.0/16`
+- **Configuration**: Custom VPC with subnet-a for all nodes
 
 #### 2. **Subnets**
 - **Subnet A** (`tf-subnet-a`): 
   - CIDR: `9.0.1.0/24`
-  - Purpose: Hosts control plane and first worker node
+  - Purpose: Hosts all 3 control planes and worker nodes
   - Region: `europe-west9`
-- **Subnet B** (`tf-subnet-b`): 
-  - CIDR: `9.0.2.0/24`
-  - Purpose: Hosts second worker node for workload segregation
+  - Design: Single subnet simplifies networking while zones provide HA
 
-#### 3. **Compute Instances**
-- **Count**: 3 virtual machines (1 control plane + 2 workers by default)
-- **Control Plane**: `k8s-control-plane` (in subnet-a, zone europe-west9-a)
+#### 3. **Load Balancers (Dual Setup)**
+- **External TCP Load Balancer**:
+  - IP: `34.155.143.202` (example)
+  - Port: `6443` (Kubernetes API)
+  - Purpose: kubectl/API access from internet
+  - Scheme: `EXTERNAL`
+  - Health Check: TCP probe on port 6443 every 5s
+  
+- **Internal TCP Load Balancer**:
+  - IP: `9.0.1.6` (within VPC)
+  - Port: `6443` (Kubernetes API)
+  - Purpose: Node-to-API communication (solves GCP hairpinning)
+  - Scheme: `INTERNAL`
+  - Global Access: Enabled for cross-region scenarios
+  - Health Check: Separate TCP probe on port 6443
+
+- **Health Check Configuration**:
+  - Source IPs: `35.191.0.0/16`, `130.211.0.0/22` (GCP-owned permanent ranges)
+  - Firewall: Allows health check traffic to control-plane tagged instances
+
+#### 4. **Compute Instances - HA Control Plane**
+- **Count**: 5 virtual machines (3 control planes + 2 workers)
+- **Control Planes**: 
+  - `control-plane-1` (zone: europe-west9-a, etcd member)
+  - `control-plane-2` (zone: europe-west9-b, etcd member)
+  - `control-plane-3` (zone: europe-west9-c, etcd member)
 - **Worker Nodes**: 
-  - `k8s-worker-1` (in subnet-a, zone europe-west9-a)
-  - `k8s-worker-2` (in subnet-b, zone europe-west9-b)
+  - `k8s-worker-1` (zone: europe-west9-a)
+  - `k8s-worker-2` (zone: europe-west9-b)
 - **Machine Type**: `e2-medium` (2 vCPUs, 4GB RAM)
 - **Operating System**: Ubuntu 22.04 LTS
-- **Disk**: 10GB persistent boot disk
-- **Configurable**: Worker count can be adjusted via `worker_count` variable
+- **Disk**: 10GB persistent boot disk per instance
+- **Zone Distribution**: Control planes spread across 3 zones for zone failure tolerance
 
-#### 4. **Security Configuration**
+#### 5. **Security Configuration**
 - **Firewall Rules**:
   - `allow-internal`: Permits all internal communication within the VPC
   - `allow-ssh`: Allows SSH access (port 22) from any IP address
+  - `allow-k8s-api`: Allows access to Kubernetes API (port 6443)
+  - `allow-health-checks`: Allows GCP health check probes from `35.191.0.0/16` and `130.211.0.0/22`
 - **Service Account**: Dedicated service account for Kubernetes nodes with cloud-platform scope
 - **SSH Access**: Configured with public key authentication
+- **Network Tags**: `control-plane` tag for targeted firewall rules
 
-#### 5. **Instance Template**
-- **Purpose**: Standardized configuration for creating additional nodes
-- **Features**: 
-  - IP forwarding enabled (required for Kubernetes networking)
-  - Consistent tagging for resource management
-  - Automated service account assignment
+#### 6. **High Availability Features**
+- **etcd Quorum**: 3-member cluster (tolerates 1 failure, requires 2 for quorum)
+- **API Server Redundancy**: 3 API servers load-balanced
+- **Zone Distribution**: Survives single zone failure
+- **Automatic Failover**: Load balancer redirects traffic to healthy control planes
+- **Certificate Management**: Shared certificates via `kubeadm init --upload-certs`
 
 ## File Structure
 
 ```
 k8s-gcp-terraform-lab/
 ├── main.tf                    # Terraform configuration and backend setup
-├── variables.tf               # Variable definitions (no sensitive defaults)
+├── variables.tf               # Variable definitions (region, zones, machine types)
+├── locals.tf                  # Local values for control plane configuration
 ├── terraform.tfvars.example   # Example variables file (copy to terraform.tfvars)
 ├── backend.conf.example       # Example backend config (copy to backend.conf)
-├── network.tf                 # VPC, subnets, and firewall rules
-├── compute.tf                 # VM instances and instance templates
-├── outputs.tf                 # Output values for infrastructure components
+├── network.tf                 # VPC, subnets, firewall rules, and DUAL load balancers
+├── compute.tf                 # HA control planes (3x) and worker VMs
+├── iam.tf                     # Service accounts and IAM bindings
+├── outputs.tf                 # Output values (IPs, load balancer addresses)
 ├── .gitignore                 # Excludes sensitive files from version control
 └── terraform-admin.json       # GCP service account credentials (NOT in repo)
 ```
@@ -193,21 +234,37 @@ ssh ubuntu@<node-ip-address>
 
 ## Cost Considerations
 
-- **Estimated Monthly Cost**: ~$45-75 USD (1 control plane + 2 workers with e2-medium instances)
+- **Estimated Monthly Cost**: ~$160-180 USD for HA setup:
+  - 3 control planes (e2-medium): ~$75/month
+  - 2 workers (e2-medium): ~$50/month
+  - 2 TCP load balancers: ~$20/month
+  - 5 persistent disks (10GB each): ~$5/month
+  - Networking/egress: ~$10/month
 - **Cost Optimization**: 
-  - Instances are sized for learning/testing, not production workloads
-  - 10GB disks keep costs minimal while providing sufficient space
-  - Consider using preemptible instances for additional savings
-  - Remember to destroy resources when not in use: `terraform destroy`
+  - **vs Single Control Plane**: HA adds ~$85/month but provides production-grade reliability
+  - Instances sized for testing, not production workloads
+  - Consider preemptible instances for dev/test environments (save ~60%)
+  - Internal LB has no cost for traffic within same region
+  - **Remember to destroy resources when not in use**: `terraform destroy`
+- **Production Considerations**:
+  - HA cluster survives zone failures (worth the cost for production)
+  - Single control plane: ~$75/month (no HA, no failover)
+  - For learning/testing, single control plane may be sufficient
 
 ## Next Steps
 
-After infrastructure deployment:
+After infrastructure deployment, you'll have a production-ready HA cluster infrastructure. Follow the [k8s-bootstrap](https://github.com/mehenna/k8s-bootstrap) project to deploy Kubernetes:
 
-1. **Install Kubernetes**: Set up kubeadm, kubelet, and kubectl on all nodes
-2. **Initialize Cluster**: Create the master node and join worker nodes
-3. **Configure Networking**: Install a CNI plugin (Calico, Flannel, etc.)
-4. **Practice CKA/CKS Tasks**: Use the cluster for certification preparation
+1. **Bootstrap HA Kubernetes**: Use Ansible playbooks to initialize the 3-node control plane cluster
+2. **Configure CNI**: Install Calico with VXLAN networking
+3. **Join Workers**: Add worker nodes to the cluster
+4. **Verify HA**: Test failover by stopping one control plane
+5. **Access Cluster**: Use external LB IP for kubectl commands
+
+**Recommended Resources:**
+- [HA_DEPLOYMENT_GUIDE.md](https://github.com/mehenna/k8s-bootstrap/blob/feature/high_availability_cluster/HA_DEPLOYMENT_GUIDE.md) - Complete deployment walkthrough
+- [ISSUES_FACED.md](https://github.com/mehenna/k8s-bootstrap/blob/feature/high_availability_cluster/ISSUES_FACED.md) - Architectural evolution and troubleshooting
+- [DEPLOYMENT_SUMMARY.md](https://github.com/mehenna/k8s-bootstrap/blob/feature/high_availability_cluster/DEPLOYMENT_SUMMARY.md) - Cluster overview and validation
 
 ## Troubleshooting
 
@@ -220,18 +277,31 @@ After infrastructure deployment:
 ### Useful Commands
 
 ```bash
-# Check instance status
+# Check all instances status
 gcloud compute instances list
 
-# SSH to control plane
-gcloud compute ssh k8s-control-plane --zone=europe-west9-a
+# SSH to control planes
+gcloud compute ssh control-plane-1 --zone=europe-west9-a
+gcloud compute ssh control-plane-2 --zone=europe-west9-b
+gcloud compute ssh control-plane-3 --zone=europe-west9-c
 
 # SSH to workers
 gcloud compute ssh k8s-worker-1 --zone=europe-west9-a
 gcloud compute ssh k8s-worker-2 --zone=europe-west9-b
 
+# Check load balancers
+gcloud compute forwarding-rules list
+gcloud compute backend-services list
+gcloud compute health-checks list
+
 # View firewall rules
 gcloud compute firewall-rules list
+
+# Test external load balancer (from your local machine)
+curl -k https://<EXTERNAL_LB_IP>:6443/version
+
+# Test internal load balancer (from any control plane)
+curl -k https://9.0.1.6:6443/version
 ```
 
 ## Security Notes
