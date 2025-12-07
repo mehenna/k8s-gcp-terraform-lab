@@ -3,6 +3,8 @@ resource "google_service_account" "k8s_nodes" {
   account_id   = "k8s-nodes"
   display_name = "Kubernetes Node Service Account"
   project      = var.project_id
+
+  depends_on = [google_project_service.iam]
 }
 
 # === IAM Bindings for Minimal Privileges ===
@@ -23,6 +25,8 @@ resource "google_service_account" "terraform_admin" {
   account_id   = "terraform-admin"
   display_name = "Terraform Admin Service Account"
   project      = var.project_id
+
+  depends_on = [google_project_service.iam]
 }
 
 resource "google_project_iam_member" "terraform_admin_editor" {
